@@ -21,7 +21,7 @@
 
 namespace util {
 
-// Log levels with explicit numeric values for easy comparison
+// Log levels
 enum class LogLevel : int {
     TRACE = 0,
     DEBUG = 1,
@@ -41,8 +41,8 @@ enum class FormatType {
 // Sampling strategies
 enum class SamplingType {
     NONE,
-    RANDOM,     // Sample X% randomly
-    EVERY_NTH   // Sample every Nth message
+    RANDOM,    
+    EVERY_NTH
 };
 
 // Level metadata for formatting
@@ -88,8 +88,8 @@ inline constexpr std::string_view color_reset() noexcept {
 // Sampling configuration
 struct SamplingConfig {
     SamplingType type = SamplingType::NONE;
-    double rate = 1.0;           // For random sampling (0.0-1.0)
-    uint32_t every_nth = 1;      // For every-nth sampling
+    double rate = 1.0;           
+    uint32_t every_nth = 1;      
     LogLevel min_level = LogLevel::TRACE;  // Apply only to this level and above
     
     SamplingConfig() = default;
@@ -109,6 +109,7 @@ using FieldValue = std::variant<
 >;
 
 // Helper to convert FieldValue to string for TEXT format
+// TODO: Add generic to_string conversion for all types
 inline std::string field_value_to_string(const FieldValue& value) {
     return std::visit([](const auto& v) -> std::string {
         using T = std::decay_t<decltype(v)>;
@@ -133,7 +134,7 @@ inline std::string field_value_to_json(const FieldValue& value) {
         if constexpr (std::is_same_v<T, std::string>) {
             return "\"" + v + "\"";  // TODO: Add proper JSON escaping
         } else if constexpr (std::is_same_v<T, std::string_view>) {
-            return "\"" + std::string(v) + "\"";  // TODO: Add proper JSON escaping
+            return "\"" + std::string(v) + "\"";
         } else if constexpr (std::is_same_v<T, bool>) {
             return v ? "true" : "false";
         } else if constexpr (std::is_arithmetic_v<T>) {
@@ -144,12 +145,12 @@ inline std::string field_value_to_json(const FieldValue& value) {
     }, value);
 }
 
-// Log record containing all information for one log event
+// Log record for one log event
 struct LogRecord {
     LogLevel level;
     std::variant<std::string, std::string_view> message; // Zero-copy optimization
     std::map<std::string, std::string> tags;
-    std::map<std::string, FieldValue> fields;  // NEW: Typed fields
+    std::map<std::string, FieldValue> fields;
     std::chrono::system_clock::time_point timestamp;
     std::thread::id thread_id;
     bool use_json = false;
@@ -169,7 +170,6 @@ struct LogRecord {
         , thread_id(std::this_thread::get_id())
     {}
     
-    // Get message as string (promotes string_view to string if needed)
     std::string get_message_string() const {
         return std::visit([](const auto& msg) -> std::string {
             return std::string(msg);
@@ -177,7 +177,6 @@ struct LogRecord {
     }
     
     // TODO: Add LogRecord pooling for better performance
-    // TODO: Add pattern-based formatting support
 };
 
 using LogSink = std::function<void(const std::string&)>;
@@ -209,7 +208,7 @@ public:
         , start_(std::chrono::steady_clock::now())
     {}
     
-    // Support chaining like normal log entries - FIXED: return rvalue reference for chaining
+    // Support chaining like normal log entries
     ProfileTimer&& tag(const std::string& key, const std::string& value) && {
         tags_[key] = value;
         return std::move(*this);
@@ -251,7 +250,6 @@ public:
             entry.field(k, v);
         }
         
-        // Add automatic profiling fields
         entry.field("duration_ms", static_cast<int64_t>(ms.count()))
              .field("operation_name", operation_)
              .tag("profiler", "auto");
@@ -281,7 +279,7 @@ private:
     std::map<std::string, FieldValue> fields_;
 };
 
-// Scoped tag manager (RAII)
+// Scoped tag manager
 template<LogLevel CompileTimeMinLevel>
 class ScopedTags {
 public:
@@ -332,7 +330,6 @@ public:
         return *this;
     }
     
-    // SIMPLIFIED: Exception integration - separate overloads without SFINAE
     LogEntryBuilder& exception(const std::exception& e) {
         try {
             return field("exception_type", std::string(typeid(e).name()))
@@ -431,8 +428,6 @@ public:
     {
         // Start background worker thread
         worker_thread_ = std::thread([this] { process_log_queue(); });
-        
-        // Add default console sink
         add_default_sink();
     }
     
@@ -446,7 +441,7 @@ public:
     Logger(Logger&&) = default;
     Logger& operator=(Logger&&) = default;
 
-    // Configuration methods (fluent interface)
+    // Configuration methods
     Logger& set_level(LogLevel level) {
         runtime_min_level_.store(level, std::memory_order_relaxed);
         return *this;
@@ -466,7 +461,6 @@ public:
         return *this;
     }
     
-    // Global scope tags (persistent across all log calls)
     Logger& set_global_scope(std::map<std::string, std::string> global_scope) {
         std::lock_guard<std::mutex> lock(static_tags_mutex_);
         global_scope_ = std::move(global_scope);
@@ -479,24 +473,20 @@ public:
         return *this;
     }
     
-    // Create scoped tags (RAII)
     ScopedTagsType with_scope(std::map<std::string, std::string> tags) {
         return ScopedTagsType(this, std::move(tags));
     }
     
-    // Create performance profiler (RAII)
     ProfileTimerType profile(const std::string& operation, LogLevel level = LogLevel::INFO) {
         return ProfileTimerType(this, level, operation);
     }
     
-    // Sink management with format specification
     Logger& add_sink(LogSink sink, FormatType format = FormatType::TEXT) {
         std::lock_guard<std::mutex> lock(sinks_mutex_);
         sinks_.emplace_back(std::move(sink), format);
         return *this;
     }
     
-    // Global sampling configuration
     Logger& set_sampling(SamplingConfig config) {
         global_sampling_ = config;
         return *this;
@@ -552,18 +542,18 @@ public:
         }
         
         // Add all types of tags to the record in correct priority order
-        // Priority: per-message (highest) > scoped > static > global (lowest)
+        // Priority: per-message  > scoped > static > global
         std::map<std::string, std::string> final_tags;
         
         {
             std::lock_guard<std::mutex> lock(static_tags_mutex_);
             
-            // Start with global scope tags (lowest priority)
+            // Start with global scope tags
             for (const auto& [key, value] : global_scope_) {
                 final_tags[key] = value;
             }
             
-            // Add static tags (overwrite global if same key)
+            // Add static tags
             for (const auto& [key, value] : static_tags_) {
                 final_tags[key] = value;
             }
@@ -577,7 +567,7 @@ public:
             }
         }
         
-        // Finally, add per-message tags (highest priority - overwrite everything)
+        // Finally, add per-message tags
         for (const auto& [key, value] : record.tags) {
             final_tags[key] = value;
         }

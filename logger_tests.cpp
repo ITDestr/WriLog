@@ -1417,7 +1417,6 @@ void test_advanced_features_performance() {
 
 int main() {
     std::vector<std::pair<std::string, std::function<void()>>> all_tests = {
-        // Updated existing tests
         {"High Volume Logging", test_high_volume_logging},
         {"Concurrent Logging", test_concurrent_logging},
         {"Error Resilience", test_error_resilience},
@@ -1427,7 +1426,6 @@ int main() {
         {"Shutdown Behavior", test_shutdown_behavior},
         {"Compile-time Performance", test_compile_time_performance},
         
-        // New modern feature tests
         {"Scoped Tags", test_scoped_tags},
         {"Global Scope", test_global_scope},
         {"Multiple Format Sinks", test_multiple_format_sinks},
@@ -1470,6 +1468,9 @@ int main() {
     std::cout << "=== Modern Logger Complete Test Suite ===" << std::endl;
     std::cout << "Running " << all_tests.size() << " tests...\n" << std::endl;
     
+    auto rng = std::default_random_engine(std::random_device{}());
+    std::ranges::shuffle(all_tests, rng);
+
     for (auto& [name, test_func] : all_tests) {
         try {
             test_func();
